@@ -131,7 +131,7 @@ combined_data <- combined_data[combined_data$openbid>5,] ## factor out some outl
 
 ```
 
-#### **Closer Look at the Data:**
+#### **Data Collection and Assessment:**
 
 In our dataset, acquired from https://www.modelingonlineauctions.com, there were 7 initial fields:
 
@@ -291,7 +291,6 @@ Conversely, the 5 and 7-day auctions reveal more tightly clustered opening bid v
 
 ```{r, echo = FALSE, fig.cap= "Correlations"}
 
-
 correlation_matrix <- cor(combined_data[, c("price", "AvgBid", "openbid", "UniqueBidders", "AverageRating", "BidsBeforeLast", 
 "TotalBids")])
 
@@ -300,6 +299,10 @@ rounded_correlation_matrix <- round(correlation_matrix, 2)
 pairs(combined_data[, c("price", "AvgBid", "openbid", "UniqueBidders", "AverageRating", "BidsBeforeLast", 
 "TotalBids")], pch=19, main = "Scatterplot Matrix")
 # Display the rounded correlation matrix using kable
+
+```
+
+```{r, echo=FALSE}
 kable(rounded_correlation_matrix, caption = "Correlation Matrix")
 ```
 
@@ -622,3 +625,7 @@ In terms of future work, one promising avenue is exploring alternative predictio
 ## References
 
 Boaz Shmueli, 2020. "Modeling Online Auctions Datasets." Retrieved from <https://www.modelingonlineauctions.com/datasets>
+
+## Self-Reflection
+
+Overall, this assignment was incredibly fulfilling. I got to apply many of the concepts I learned in STAT 410 in a very practical way. Witnessing the successful application of regression techniques was particularly satisfying. As I delved into the project, I found myself utilizing various skills, especially in the context of regressor transformations, model validation, and statistical tests to enhance the model's suitability. The project also addressed some long-standing curiosities I had about online auction dynamics. Answering questions like whether to start auctions at low or high prices and when to place bids provided practical insights. Maybe I'll have a advantage when bidding on ebay items now! While some aspects remain unclear, the experience has ignited a curiosity to delve deeper into these observations. This project has reinforced my fascination with the world of statistics, and I eagerly anticipate applying these analytical skills in the future. The ability to draw meaningful conclusions from data and make informed decisions is a powerful aspect of statistical analysis that continues to captivate me.
