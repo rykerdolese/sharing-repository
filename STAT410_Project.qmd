@@ -1,0 +1,631 @@
+---
+title: "Bidding Wars: A Look into Consumer Tendencies on Ebay"
+author: "Ryker Dolese"
+format: pdf
+fig_caption: yes
+editor: visual
+fontsize: 10pt
+geometry: margin=0.8in
+---
+
+## **Introduction**
+
+The dataset at the heart of this project centers around eBay bidding wars, where users compete for the chance to win a product through online auctions. These auctions have a unique competitive environment where bidders place bids, and the item goes to the highest bidder when the auction concludes. The specific focus of this project is on eBay auctions for Palm Pilot M515 PDAs, which were a popular personal digital assistant (PDA) device from the early 2000s. A Palm Pilot M515 PDA was a handheld electronic device designed for various tasks, including organization, note-taking, and data management, and this project will explore the dynamics of eBay auctions for these devices.
+
+### **Statement of Purpose:**
+
+The primary objective of this project is to examine the factors that influence the final selling price of Palm Pilot M515 PDAs in eBay auctions. To achieve this, we aim to address the following questions and goals:
+
+1\. **Price Prediction**: Can we develop a predictive model that accurately estimates the closing price of Palm Pilot M515 PDAs in eBay auctions based on key variables such as the bid, bidder feedback rating, and bid timing?
+
+2\. **Bidder Behavior Analysis**: What are the patterns and tendencies of eBay users in online auctions, and how do these behaviors impact the final selling price? Are there any effects of particular interest regarding bidder actions and outcomes?
+
+### Background and Plan:
+
+To frame our project, we conducted extensive background research into the world of online auctions, eBay in particular, and the unique characteristics of Palm Pilot M515 PDAs. Our project's goals will be addressed through a combination of statistical analyses, including regression analysis, to predict selling prices. We will also utilize descriptive statistics and visualizations to explore bidder behavior and auction dynamics. Confidence intervals and hypothesis tests will help us draw meaningful conclusions about the factors that influence auction outcomes.
+
+```{r, echo=FALSE}
+suppressPackageStartupMessages({
+library(knitr)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(broom)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(lubridate)
+library(gridExtra)
+library(Matrix)
+library(glmnet)
+library(MASS)
+library(olsrr)
+library(car)
+  # Add more library calls as needed
+})
+setwd("~/Documents/STAT 410")
+palm7 <- read.csv("Palm7day.csv")
+palm5 <- read.csv("Palm5day.csv")
+palm3 <- read.csv("Palm3day.csv")
+
+palm3 <- mutate(palm3, AuctionLength = 3) ## just to clarify which auction length
+palm5 <- mutate(palm5, AuctionLength = 5)
+palm7 <- mutate(palm7, AuctionLength = 7)
+
+palm_full <- bind_rows(palm7, palm5, palm3) # bind into one large dataset
+durations <- read.csv("palmduration.csv")
+
+#https://www.modelingonlineauctions.com/datasets
+
+
+palm7 <- mutate(palm7, Biddate = ifelse(bidtime<6, "BeforeLast", "Last"))
+palm7 <- palm7 %>%
+  group_by(auctionid) %>%
+  mutate(BidsBeforeLastMax = ifelse(Biddate == "BeforeLast", max(bid[Biddate == "BeforeLast"]), 0))
+  
+palm7 <- palm7 %>%
+  group_by(auctionid) %>%
+  summarise(
+    AvgBid = mean(bid),
+    TotalBids = n(),  
+    BidsBeforeLast = sum(Biddate == "BeforeLast"),
+    BidsAfterLast = sum(Biddate == "Last"),
+    AverageRating = mean(bidderrate),
+    UniqueBidders = length(unique(bidder))
+  ) %>%
+  left_join(palm7, by = "auctionid") %>%
+  distinct(auctionid, .keep_all = TRUE) %>%
+  dplyr::select(auctionid, price, openbid, AvgBid, TotalBids, 
+         BidsBeforeLast, BidsAfterLast, BidsBeforeLastMax, AverageRating, AuctionLength, UniqueBidders)
+
+
+
+palm5 <- mutate(palm5, Biddate = ifelse(bidtime<4, "BeforeLast", "Last"))
+
+palm5 <- palm5 %>%
+  group_by(auctionid) %>%
+  mutate(BidsBeforeLastMax = ifelse(Biddate == "BeforeLast", max(bid[Biddate == "BeforeLast"]), 0))
+palm5 <- palm5 %>%
+  group_by(auctionid) %>%
+  summarise(
+    AvgBid = mean(bid),
+    TotalBids = n(),  
+    BidsBeforeLast = sum(Biddate == "BeforeLast"),
+    BidsAfterLast = sum(Biddate == "Last"),
+    AverageRating = mean(bidderrate),
+    UniqueBidders = length(unique(bidder))
+  ) %>%
+  left_join(palm5, by = "auctionid") %>%
+  distinct(auctionid, .keep_all = TRUE) %>%
+  dplyr::select(auctionid, price, openbid, AvgBid, TotalBids, 
+         BidsBeforeLast, BidsAfterLast, BidsBeforeLastMax, AverageRating, AuctionLength, UniqueBidders)
+
+
+palm3 <- mutate(palm3, Biddate = ifelse(bidtime<2, "BeforeLast", "Last"))
+palm3 <- palm3 %>%
+  group_by(auctionid) %>%
+  mutate(BidsBeforeLastMax = ifelse(Biddate == "BeforeLast", max(bid[Biddate == "BeforeLast"]), 0))
+palm3 <- palm3 %>%
+  group_by(auctionid) %>%
+  summarise(
+    AvgBid = mean(bid),
+    TotalBids = n(),  
+    BidsBeforeLast = sum(Biddate == "BeforeLast"),
+    BidsAfterLast = sum(Biddate == "Last"),
+    AverageRating = mean(bidderrate),
+    UniqueBidders = length(unique(bidder))
+  ) %>%
+  left_join(palm3, by = "auctionid") %>%
+  distinct(auctionid, .keep_all = TRUE) %>%
+  dplyr::select(auctionid, price, openbid, AvgBid, TotalBids, 
+         BidsBeforeLast, BidsAfterLast, BidsBeforeLastMax, AverageRating, AuctionLength, UniqueBidders)
+
+combined_data <- bind_rows(palm7, palm5, palm3)
+
+combined_data <- combined_data %>%
+  mutate(Perc_BidsAfterLast = (BidsAfterLast/TotalBids)*100)
+combined_data <- combined_data %>%
+  mutate(BidsPerDay = (TotalBids/AuctionLength))
+
+combined_data <- combined_data[combined_data$openbid>5,] ## factor out some outliers
+
+```
+
+#### **Data Collection and Assessment:**
+
+In our dataset, acquired from https://www.modelingonlineauctions.com, there were 7 initial fields:
+
+1.  auctionid - This field serves as a unique identifier for each auction in the dataset. It distinguishes one eBay auction from another and will be useful for tracking individual auction records.
+
+2.  bid - The "bid" field represents the proxy bid placed by a bidder in the eBay auction. This is the amount the bidder is willing to pay for the item.
+
+3.  bidtime - This field indicates the time, in days, when the bid was placed relative to the start of the auction. It provides insights into the timing of bids throughout the auction's duration.
+
+4.  bidder - "bidder" contains the eBay username of the bidder participating in the auction. It identifies who is placing the bids.
+
+5.  bidderrate - This field represents the eBay feedback rating of the bidder. eBay users typically provide feedback on their experiences with a bidder, and this rating can indicate their trustworthiness and history on the platform.
+
+6.  openbid - "openbid" denotes the opening bid set by the seller when the auction began. It represents the initial price at which the item was offered for bidding.
+
+7.  price - The "price" field indicates the closing price at which the item was sold in the auction. This closing price is calculated based on the second-highest bid plus an increment, as per eBay's auction rules.
+
+## Exploratory Data Analysis
+
+```{r, echo = FALSE, fig.cap = "Price and Auction Length", fig.width=7}
+
+# Set the seed for reproducibility
+set.seed(123)
+
+# Randomly sample 10 unique auction IDs
+sample_ids <- sample(unique(palm_full$auctionid), 10)
+
+# Filter the dataset to include only the sampled auctions
+palm_full_sample <- palm_full %>%
+  filter(auctionid %in% sample_ids)
+
+ggplot(palm_full_sample)+
+  aes(bidtime, bid, fill = factor(auctionid), color = factor(auctionid))+
+  geom_point()+
+  facet_wrap(~factor(AuctionLength))+
+  ggtitle("Bid price vs. Auction Time Elapsed by Auction Length")+
+  ylab("Bid Price ($)")+
+  xlab("Time Elapsed (days)")+
+  theme_sjplot()
+```
+
+Figure 1 provides a visual representation of a random sample of auctions and their bids over time. Notably, it reveals that, as auctions approach their final day, there is a significant and rapid increase in bidding activity, suggesting a distribution with exponential characteristics. Moreover, the plot indicates that auctions with shorter durations, such as 3 days and 5 days, experience this price increase much earlier in the bidding process.
+
+This observation could imply that bidders are more motivated to participate as the auction deadline approaches, potentially due to a sense of urgency to secure the item they desire. Additionally, shorter auction durations may prompt quicker bidding and competitive behavior, leading to early price escalation.
+
+#### Feature Engineering
+
+As mentioned above, we have the data for every individual bid. However, it may be most ideal if we look at each auction wholistically. Therefore, we have grouped by 'auctionid' to create new metrics that could predict selling price. We use our previous data to identify these new features:
+
+1.  **AvgBid**: represents the average bid placed in the auction. It's calculated as the mean of all the individual bids.
+
+    -   Formula: **`AvgBid = mean(bid)`**
+
+2.  **TotalBids**: TotalBids is the count of the total number of bids in the auction. It provides the total bidding activity for all auctions.
+
+    -   Formula: **`TotalBids = n()`**
+
+3.  **BidsBeforeLast**: indicates the number of bids placed before the last day in an auction. It helps identify the level of bidding activity prior to the closing stages of an auction.
+
+    -   Formula: **`BidsBeforeLast = sum(Biddate == "BeforeLast")`**
+
+4.  **BidsAfterLast**: represents the number of bids placed after the last day in an auction. It reflects the activity that occurs during the final moments of an auction.
+
+    -   Formula: **`BidsAfterLast = sum(Biddate == "Last")`**
+
+5.  **AverageRating**: the mean eBay feedback rating of the bidders in the auction. It provides an overall assessment of the bidders' trustworthiness and performance on eBay.
+
+    -   Formula: **`AverageRating = mean(bidderrate)`**
+
+6.  **UniqueBidders**: counts the number of unique eBay usernames (bidders) participating in the auctions. It identifies the diversity of bidders involved in the bidding process.
+
+    -   Formula: **`UniqueBidders = length(unique(bidder))`**
+
+```{r, echo = FALSE, fig.cap = "Distribution of Bids", fig.width=10}
+opening_plot <- ggplot(combined_data) +
+  aes(openbid) +
+  #geom_histogram() +
+  geom_density() + 
+  ggtitle("Density Plot of Opening Bids") +
+  ylab("Density") +
+  xlab("Opening Bid ($)") +
+  theme_sjplot()
+
+
+total_plot <- ggplot(combined_data) +
+  aes(TotalBids, fill = factor(AuctionLength), color = factor(AuctionLength)) +
+  geom_histogram(bins = 20) +
+  facet_wrap(~factor(AuctionLength)) +
+  ggtitle("Histogram of Number of Bids per Auction") +
+  ylab("Density") +
+  xlab("Number of Bids")+
+  theme_sjplot()
+
+
+grid.arrange(opening_plot, total_plot, ncol = 2)
+```
+
+Figure 2 provides a clear representation of the distribution of opening bids, revealing a bimodal pattern. The majority of opening bids fall into two distinct categories: one with very low bids, typically less than \$10, and another with considerably higher opening bids, often around \$200, approaching the eventual selling price.
+
+This bimodal distribution could suggest two different types of client behavior:
+
+1.  Low-Budget Bidders: Bidders in the first group with very low opening bids may be looking for bargains or lower-priced items. They might be more price-sensitive and cautious in their initial bids, preferring to start with minimal offers.
+2.  Competitive Bidders: The second group with high opening bids approaching the final selling price might consist of more competitive or confident bidders. They might be willing to make larger initial bids to assert their interest in securing the item and to deter potential competition.
+
+The second plot in Figure 2 illustrates the distribution of the number of bids per auction, revealing distinct patterns among different auction lengths. It's apparent that the number of bids tends to be right-skewed, particularly in shorter auctions like the 3-day auctions, where a significant proportion of auctions have fewer than 10 total bids. In contrast, the 5 and 7-day auctions exhibit a somewhat more uniform distribution but still maintain right-skewed tendencies.
+
+Short auction durations appear to foster more rapid bidding, with a concentration of auctions having a limited number of bids. This could indicate a sense of urgency among bidders to participate and secure items quickly. Longer auctions display a somewhat more balanced distribution of bids, potentially reflecting a more gradual bidding process with less urgency. Bidders might take their time to assess the value of items and place bids at a steadier pace.
+
+```{r, echo = FALSE, fig.cap = "Boxplot of Numerical Variables", fig.width=9}
+library(ggplot2)
+
+# Create the boxplots for each numerical variable
+boxplots <- ggplot(combined_data) +
+  aes(x = factor(AuctionLength), y = openbid, fill = factor(AuctionLength)) +
+  geom_boxplot() +
+  ggtitle("Boxplots of Opening Bids") +
+  ylab("Opening Bid ($)") +
+  xlab("Auction Length") +
+  theme_sjplot()
+
+# Use facet_wrap to create subplots for different measures
+boxplots_openbid <- boxplots
+
+boxplots_totalbids <- ggplot(combined_data) +
+  aes(x = factor(AuctionLength), y = TotalBids, fill = factor(AuctionLength)) +
+  geom_boxplot() +
+  ggtitle("Boxplots of Total Bids") +
+  ylab("Total Bids") +
+  xlab("Auction Length") +
+  theme_sjplot()
+
+boxplots_price <- ggplot(combined_data) +
+  aes(x = factor(AuctionLength), y = price, fill = factor(AuctionLength)) +
+  geom_boxplot() +
+  ggtitle("Boxplots of Price") +
+  ylab("Price") +
+  xlab("Auction Length") +
+  theme_sjplot()
+
+boxplots_uniquebidders <- ggplot(combined_data) +
+  aes(x = factor(AuctionLength), y = UniqueBidders, fill = factor(AuctionLength)) +
+  geom_boxplot() +
+  ggtitle("Boxplots of Unique Bidders") +
+  ylab("Unique Bidders") +
+  xlab("Auction Length") +
+  theme_sjplot()
+
+# Create a grid of subplots
+
+grid.arrange(boxplots_openbid, boxplots_totalbids, boxplots_price, boxplots_uniquebidders, ncol = 2)
+
+```
+
+In this collection of boxplots (Figure 3), we observe varying trends across different measures for distinct auction lengths. Notably, the 5 and 7-day auctions exhibit similar characteristics, while the 3-day auctions display more sporadic patterns. In the realm of opening bids, the 3-day auctions show a broader range of values with pronounced outliers, indicating greater variability.
+
+Conversely, the 5 and 7-day auctions reveal more tightly clustered opening bid values. The number of unique bidders tends to rise as auction length increases, with longer auctions showcasing a wider spread in the distribution of unique bidders. In 3-day auctions, there's a concentrated distribution with occasional extreme outliers. Similar patterns emerge with total bids, mirroring unique bidders. Remarkably, 3-day auctions maintain a wider range of total bid counts. Selling prices, on the other hand, appear relatively consistent across auction lengths, but 3-day auctions notably feature lower median selling prices compared to their longer counterparts, suggesting unique pricing dynamics in shorter auctions.
+
+```{r, echo = FALSE, fig.cap= "Correlations"}
+
+correlation_matrix <- cor(combined_data[, c("price", "AvgBid", "openbid", "UniqueBidders", "AverageRating", "BidsBeforeLast", 
+"TotalBids")])
+
+#correlation_matrix <- cor(combined_data[, c("price", "openbid", "AuctionLength", "TotalBids", #"BidsBeforeLast", "BidsAfterLast", "AverageRating", "AvgBid", "BidsBeforeLastMax", #"Perc_BidsAfterLast", "UniqueBidders", "BidsPerDay")])
+rounded_correlation_matrix <- round(correlation_matrix, 2)
+pairs(combined_data[, c("price", "AvgBid", "openbid", "UniqueBidders", "AverageRating", "BidsBeforeLast", 
+"TotalBids")], pch=19, main = "Scatterplot Matrix")
+# Display the rounded correlation matrix using kable
+
+```
+
+```{r, echo=FALSE}
+kable(rounded_correlation_matrix, caption = "Correlation Matrix")
+```
+
+The correlation matrix (Table 1) and pairplot (Figure 4) of potential regressors reveal significant insights into the relationships among the variables in the dataset. Notably, a strong positive correlation exists between the selling price and the average bid (0.4211), indicating that, on average, higher bid amounts correspond to higher selling prices. Conversely, shorter auction lengths, such as 3-day auctions, exhibit higher negative correlations with total bids, open bid, unique bidders, and average bid. The most notable correlation in the matrix is the high negative correlation (-0.8266) between total bids and the opening bid, signifying that as the total number of bids increases, the initial bid amount tends to decrease. Furthermore, the number of unique bidders demonstrates a substantial negative correlation with total bids, open bid, and average bid, implying that an increase in unique bidders is associated with reduced values for these variables. These findings shed light on the complex interplay between auction dynamics and the variables at play, providing a solid foundation for further analysis and modeling. Of note, some variables even appear to have exponential relationships with each other; for instance, looking at the scatterplot between AvgBid and openbid, the relationship appears more exponential rather than linear. As such, we might want to look into regressor transformations when we begin modeling.
+
+## Modeling
+
+Now, we will begin producing our model to predict selling price. We will begin with a relatively simple linear regression model where we see the effect of average bid and auction length on price.
+
+```{r, echo=FALSE, fig.cap = "Regression Modelling", fig.width = 6}
+price <- combined_data$price
+openbid <- combined_data$openbid
+AuctionLength <- combined_data$AuctionLength
+TotalBids <- combined_data$TotalBids
+BidsBeforeLast <- combined_data$BidsBeforeLast
+BidsAfterLast <- combined_data$BidsAfterLast
+AverageRating <- combined_data$AverageRating
+AvgBid <- combined_data$AvgBid
+BidsBeforeLastMax <- combined_data$BidsBeforeLastMax
+PercentBidsLastDay <- combined_data$Perc_BidsAfterLast
+UniqueBidders <- combined_data$UniqueBidders
+BidsPerDay <- combined_data$BidsPerDay
+
+ggplot(combined_data)+
+  aes(AvgBid, price, fill=factor(AuctionLength), color = factor(AuctionLength))+
+  geom_point(alpha=0.3)+
+  geom_smooth(method = "lm", formula = y ~ x)+
+  ggtitle("First Regression Model")+
+  xlab("Average Bid ($)")+
+  ylab("Selling Price ($)")+
+  theme_sjplot()
+
+```
+
+In this regression model plot (Figure 5), several key observations stand out. Firstly, there's a clear and positive linear correlation between the average bid and the selling price. As the average bid increases, the selling price consistently rises, indicating a direct relationship between these two factors. Notably, the plot showcases varied slopes for different auction lengths, emphasizing that the strength of this correlation differs across auction durations. While auction length does exert some influence on the correlation, it doesn't significantly alter the overall positive trend. In essence, this plot underscores the robust positive relationship between average bid and selling price, with some nuanced variations in the influence of auction length.
+
+```{r, echo = FALSE}
+# Obtain summary statistics including the F-statistic
+# Define the full and null models
+full_model <- lm(price ~ openbid + AuctionLength + TotalBids + BidsBeforeLast + BidsAfterLast + AverageRating + AvgBid + BidsBeforeLastMax + PercentBidsLastDay + UniqueBidders + BidsPerDay)
+
+model <- lm(price ~ AvgBid + AuctionLength)
+
+model_summary <- broom::glance(model)[-6:-12]
+model_summary$det <- det(cor(combined_data[, c("AvgBid", "AuctionLength")]))
+model_summary$AIC <- extractAIC(model, k=2)[2]
+model_summary$BIC <- extractAIC(model,k=log(length(price)))[2]
+model_summary$Cp <- ols_mallows_cp(model, full_model)
+# Obtain coefficients and standard errors
+model_coefficients <- broom::tidy(model)
+
+
+# Create a table using kable
+kable(model_coefficients, caption = "First Model Summary")
+kable(model_summary, caption = "Additional Statistics")
+#summary(model)
+
+```
+
+The coefficients in Table 2 reflect the estimated effects of the independent variables on the dependent variable. The intercept indicates the expected selling price when all other variables are zero, which might not have a practical interpretation. The coefficient for AvgBid suggests that for each one-unit increase in the average bid, the selling price is estimated to increase by approximately 0.2592 dollars. Likewise, the coefficient for AuctionLength implies that a one-unit increase in auction length is associated with an estimated selling price increase of approximately 3.1455 dollars. The accompanying statistics (Table 3) reveal that about 23.09% of the variation in selling price is explained by the model, indicating a statistically significant model. The degrees of freedom for residuals and the number of observations in the dataset are also provided.
+
+#### New Model: MLR
+
+Our previous model performed alright. Both coefficients had p-values well below the alpha = 0.05 threshold. However, only 23% of our variation can be explained by our model, which is not ideal. With the additional variables at our disposal, we can implement a more robust MLR model and see how it performs.
+
+```{r, echo=FALSE}
+# Load the 'leaps' library
+library(leaps)
+
+# Define the full and null models
+full_model <- lm(price ~ openbid + AuctionLength + TotalBids + BidsBeforeLast + BidsAfterLast + AverageRating + AvgBid + BidsBeforeLastMax + PercentBidsLastDay + UniqueBidders + BidsPerDay)
+null_model <- lm(price ~ 1)
+
+# Perform the forward stepwise selection
+stepwise_result <- step(null_model, scope = list(upper = full_model, lower = null_model), direction = "forward",  trace = 0)
+
+# Create a summary table
+summary_table <- as.data.frame(stepwise_result$anova)
+
+# Display the summary table
+kable(summary_table, caption = "Step-Wise Selection")
+```
+
+We have decided to use a step-wise forward algorithm to find the best MLR model by AIC. The Mallow's Cp has also decreased significantly. The results are in Table 4. As one can see, the best combination of regressors to minimize AIC is AvgBid, openbid, UniqueBidders, AverageRating, BidsBeforeLast, and TotalBids.
+
+```{r, echo=FALSE}
+model <- lm(price ~ AvgBid + openbid + UniqueBidders + AverageRating + BidsBeforeLast + TotalBids)
+
+model_summary <- broom::glance(model)[-6:-12]
+model_summary$det <- det(cor(combined_data[, c("AvgBid", "openbid", "UniqueBidders", "AverageRating", "BidsBeforeLast", "TotalBids")]))
+model_summary$AIC <- extractAIC(model, k=2)[2]
+model_summary$BIC <- extractAIC(model,k=log(length(price)))[2]
+model_summary$Cp <- ols_mallows_cp(model, full_model)
+
+# Obtain coefficients and standard errors
+model_coefficients <- broom::tidy(model)
+
+
+# Create a table using kable
+kable(model_coefficients, caption = "Second Model Summary")
+kable(model_summary, caption = "Additional Statistics")
+kable(vif(model), caption = "VIFs")
+```
+
+Our improved model is notably strong, with an R-squared value of approximately 73.5%, adjusted to 72.4% when accounting for predictors, as seen in Table 5 and 6. The Residual Standard Error is around 12.98, reflecting typical prediction errors. The model is highly statistically significant, as indicated by an F-statistic with a p-value of approximately 0.0000009. Lower p-values for individual predictors suggest their significance. Overall, the model effectively explains variation in the dependent variable, attaining a robust R-squared and a significant F-statistic. The AIC and BIC are also significantly lower than that of the first model. The determinant of correlation is relatively low suggesting some multicollinearity, but it is above the threshold of 0.0001, so the model can still be considered valid. The VIFs reflect a similar result with openbid, UniqueBidders, and TotalBids each having VIFs greater than 5.
+
+### Transforming the MLR Model: Accounting for Multicollinearity
+
+After reanalyzing our exploratory analysis, it appears that openbid and TotalBids have exponential prediction power rather than linear. Therefore, we have opted for a MLR model with these the same predictors but we have taken the natural log of openbid and TotalBids, hoping to minimize the multi-collinearity issue we faced before and portray a stronger linear relationship. The results of such regression are seen in Tables 8, 9, and 10.
+
+Luckily, our approach worked to an extent. The R-squared and R-squared adjusted each rose around one percent, and the high VIF values fell considerably. Only the UniqueBidders regressor retains a VIF greater than 5. For this reason, our model appears to be especially robust. We have thus decided to further validate this model rather than our previous ones.
+
+```{r, echo = FALSE}
+model <- lm(price ~ AvgBid + log(openbid) + UniqueBidders + AverageRating + BidsBeforeLast + log(TotalBids))
+
+combined_data$logopenbid <- log(openbid)
+combined_data$logTotalBids <-log(TotalBids)
+
+model_summary <- broom::glance(model)[-6:-12]
+model_summary$det <- det(cor(combined_data[, c("AvgBid", "logopenbid", "logTotalBids","UniqueBidders", "AverageRating", "BidsBeforeLast" )]))
+model_summary$AIC <- extractAIC(model, k=2)[2]
+model_summary$BIC <- extractAIC(model, k=log(length(price)))[2]
+model_summary$Cp <- ols_mallows_cp(model, full_model)
+
+# Obtain coefficients and standard errors
+model_coefficients <- broom::tidy(model)
+
+
+# Create a table using kable
+kable(model_coefficients, caption = "Third Model Summary")
+kable(model_summary, caption = "Additional Statistics")
+kable(vif(model), caption = "VIFs")
+```
+
+```{r, echo = FALSE, fig.cap = "Model Validation", fig.width=7}
+# Create a data frame with residuals and fitted values
+
+residuals_fitted <- data.frame(
+  Fitted = model$fitted.values,
+  Residuals = model$residuals,
+  Studentized_Residuals = studres(model),
+  Y = price
+)
+
+
+# Create a scatter plot of residuals vs. fitted values
+res_plot <- ggplot(residuals_fitted, aes(x = Fitted, y = Studentized_Residuals)) +
+  geom_point() +
+  ggtitle("Stud. Residuals vs. Fitted Values") +
+  xlab("Fitted Values") +
+  ylab("Residuals")+
+  geom_hline(yintercept = 0, color = "red")+
+  theme_sjplot()
+
+pred_plot <- ggplot(residuals_fitted, aes(x = Fitted, y = Y)) +
+  geom_point() +
+  ggtitle("Price vs. Fitted Values") +
+  xlab("Fitted Values") +
+  ylab("Price")+
+  geom_smooth(method = "lm", formula = y~x)+
+  theme_sjplot()
+
+grid.arrange(pred_plot, res_plot, ncol = 2)
+```
+
+In the scatter plot of price vs. fitted values (Figure 6), it is evident that our model performs well in predicting selling prices. Additionally, there no discernible pattern among the residuals as seen in the residual plot. The residuals are scattered evenly around the horizontal line at zero, indicating that they exhibit no systematic relationship with the fitted values. This observation suggests that a linear model is appropriate for the data, as there are no indications of heteroscedasticity or other issues that might violate the assumptions of linear regression. The absence of a clear pattern in the plot affirms the model's validity for the given dataset.
+
+```{r, echo=FALSE}
+fitted <- residuals_fitted$Fitted
+res <- residuals_fitted$Residuals
+
+mod_levene_test <- function(x, y, n, k) {
+
+mid_x <- median(x)
+  
+ehatL <- y[x < mid_x]
+ehatR <- y[x >= mid_x]
+
+etildeL <- median(ehatL)
+etildeR <- median(ehatR)
+
+
+dL <- abs(ehatL - etildeL)
+dR <- abs(ehatR - etildeR)
+
+dbarL <- mean(dL)
+dbarR <- mean(dR)
+
+sigmahat <- sqrt((sum((dL - dbarL)^2) + sum((dR - dbarR)^2)) / (n - k - 1))
+SEhat <- sigmahat * sqrt(1/length(ehatL) + 1/length(ehatR))
+
+t <- (dbarL - dbarR)/SEhat
+
+## p-value
+p <- 2*(1 - pt(abs(t), n-k-1))
+
+result <- list(statistic = t, p_value = p)
+return(result)
+}
+
+test1 = mod_levene_test(fitted, res, length(fitted), 7)[1:2]
+mod_lev_test <- data.frame(statistic = test1[1], p_value = test1[2])
+kable(mod_lev_test, caption = "Modified Levene Test of Residuals")
+```
+
+From a hypothesis testing perspective, we use a Modified Levene Test to determine whether the variance of residuals is homogeneous. With a high p-value as shown in Table 10, we conclude that the residuals appear to have a homogeneous distribution, further suggesting that a linear regression model is a good fit for this data.
+
+### Regularization with Lasso
+
+Lasso (Least Absolute Shrinkage and Selection Operator) regression is a linear regression technique used for feature selection and regularization. It's a modification of ordinary least squares (OLS) regression.
+
+```{r, echo = FALSE, fig.width=7, fig.cap = "Lasso Regularization"}
+set.seed(123)
+
+
+
+# Create a data frame with your independent variables and the dependent variable (price)
+data <- combined_data
+
+# Specify your response variable and predictor variables
+y <- data$price
+X <- data.matrix(combined_data[, c("AvgBid", "openbid", 
+                                   "UniqueBidders",  "AverageRating",  "BidsAfterLast", "TotalBids")])
+
+# Exclude the 'price' column
+#x <- data.matrix(mtcars[, c('mpg', 'wt', 'drat', 'qsec')])
+# Fit the Lasso regression model
+lasso_model <- cv.glmnet(X, y, alpha = 1)  # alpha = 1 specifies Lasso regression
+
+# Plot the Lasso regularization path (optional but useful to tune the lambda parameter)
+
+
+# Perform cross-validation to select the best lambda
+cv_lasso <- cv.glmnet(X, y, alpha = 1)  # alpha = 1 for Lasso
+
+# Print the lambda value that minimizes the cross-validated error
+best_lambda <- cv_lasso$lambda.min
+plot(lasso_model)
+legend("topright", legend = paste("Best Lambda =", round(best_lambda,4)), bty = "n")
+#cat("Best Lambda:", best_lambda, "\n")
+
+
+```
+
+```{r, echo=FALSE, include = FALSE}
+# Fit the final Lasso model with the best lambda
+best_model <- glmnet(X, y, alpha = 1, lambda = best_lambda)
+# Extract the coefficients
+
+
+# Convert dgCMatrix to a regular matrix (matrix representation)
+dense_matrix <- as.matrix(coef(best_model))
+
+# Convert the dense matrix to a dataframe
+best_model_summary <- as.data.frame(dense_matrix)
+
+
+#use fitted best model to make predictions
+y_predicted <- predict(best_model, s = best_lambda, newx = X)
+
+#find SST and SSE
+sst <- sum((y - mean(y))^2)
+sse <- sum((y_predicted - y)^2)
+
+#find R-Squared
+rsq <- 1 - sse/sst
+#best_model_summary
+rsq_row <- data.frame(
+  s0 = rsq)
+rownames(rsq_row) <- "R-squared"
+best_model_summary <-rbind(best_model_summary, rsq_row)
+colnames(best_model_summary)[colnames(best_model_summary) == "s0"] <- "Estimate"
+kable(best_model_summary, caption = "Summary of Lasso Regression")
+```
+
+```{r, echo = FALSE}
+# Calculate Mallow's Cp
+n <- length(y)
+residuals <- y - predict(lasso_model, s = best_lambda, newx = X)
+#cp <- sum(residuals^2) / (n - sum(lasso_model$df))
+
+num_predictors <- sum(coef(lasso_model, s = best_lambda) != 0)
+# Calculate AIC and BIC
+aic <- n * log((sum(residuals^2) / n)) + 2 * num_predictors
+bic <- n * log((sum(residuals^2) / n)) + log(n) * num_predictors
+
+# Calculate R-squared
+predicted <- predict(lasso_model, s = best_lambda, newx = X)
+y_bar <- mean(y)
+ss_residual <- sum((y - predicted)^2)
+ss_total <- sum((y - y_bar)^2)
+r_squared <- 1 - (ss_residual / ss_total)
+
+
+# Create a data frame with the results
+results <- data.frame(
+  Lambda = best_lambda,
+  #Mallows_Cp = cp,
+  AIC = aic,
+  BIC = bic,
+  R_squared = r_squared
+)
+
+# Display the table
+kable(results)
+```
+
+The outcomes of Lasso regression have yielded an R-squared value that closely resembles the results of our conventional Multiple Linear Regression (MLR) model, as seen in Table 8. The AIC and BIC are nearly identical. This similarity in performance hints at the advantages of retaining the familiar MLR model. Its interpretability remains intact, and it continues to exhibit a high R-squared value. Consequently, we hold strong confidence in our MLR model's ability to effectively predict eBay selling prices with accuracy.
+
+## Discussion
+
+The project began by using visualizations, including density plots, boxplots, and histograms, provided insights into bidder behavior and the influence of auction length on various factors like opening bids, total bids, and unique bidders. A correlation matrix was used to explore relationships between various variables, such as price, total bids, open bid, unique bidders, average bid, and auction length. This analysis revealed important insights into which factors are most strongly correlated with selling prices. Notably, shorter auction lengths exhibited more variability in opening bids, while longer auctions tended to have more unique bidders. Subsequently, the project examined the effectiveness of a multiple linear regression (MLR) model in predicting eBay auction selling prices for Palm Pilot M515 PDAs. The trasformed MLR model explained approximately 74% of the variability in the dependent variable, with a low residual standard error. This suggests that the MLR model provides a reasonably accurate prediction of selling prices.
+
+In terms of future work, one promising avenue is exploring alternative prediction models beyond multiple linear regression. Time series analysis could be a valuable approach, particularly for price prediction, as it can capture the temporal patterns and seasonality often present in auction data. Additionally, a deeper examination of bidder behavior patterns, including when most bids occur during the auction, can provide insights into eBay auction dynamics. This analysis can help optimize auction strategies for sellers and enhance predictions. Given the lower median selling prices observed in 3-day auctions, it's worth investigating the specific price dynamics in shorter auctions, such as the impact of auction parameters like start times or seller ratings on final selling prices. Experimenting with feature engineering to identify additional predictor variables and thorough model validation, including cross-validation, will contribute to the robustness of predictive models. Expanding the dataset by collecting additional eBay auction data can further enhance the prediction models.
+
+## Appendix
+
+[Link to Code](https://nbviewer.org/github/rykerdolese/sharing-repository/blob/main/STAT%20410%20Project.qmd)
+
+## References
+
+Boaz Shmueli, 2020. "Modeling Online Auctions Datasets." Retrieved from <https://www.modelingonlineauctions.com/datasets>
+
+## Self-Reflection
+
+Overall, this assignment was incredibly fulfilling. I got to apply many of the concepts I learned in STAT 410 in a very practical way. Witnessing the successful application of regression techniques was particularly satisfying. As I delved into the project, I found myself utilizing various skills, especially in the context of regressor transformations, model validation, and statistical tests to enhance the model's suitability. The project also addressed some long-standing curiosities I had about online auction dynamics. Answering questions like whether to start auctions at low or high prices and when to place bids provided practical insights. Maybe I'll have a advantage when bidding on ebay items now! While some aspects remain unclear, the experience has ignited a curiosity to delve deeper into these observations. This project has reinforced my fascination with the world of statistics, and I eagerly anticipate applying these analytical skills in the future. The ability to draw meaningful conclusions from data and make informed decisions is a powerful aspect of statistical analysis that continues to captivate me.
